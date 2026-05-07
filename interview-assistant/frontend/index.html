@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<!--
+  Interview Assistant — Frontend com Whisper
+  Autor: Lucas Melo
+  Licença: MIT
+
+  Atalho: F1 para iniciar/parar gravação
+  Grava áudio via MediaRecorder → Whisper → Claude
+-->
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Interview Assistant · Lucas Melo</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Syne:wght@400;600;800&display=swap');
+
+    :root {
+      --bg:       #080c14;
+      --surface:  #0d1320;
+      --border:   #1a2235;
+      --cyan:     #00d4ff;
+      --green:    #00e5a0;
+      --red:      #ff4455;
+      --muted:    #3a4a63;
+      --text:     #c8d8f0;
+      --dim:      #5a7090;
+    }
+
+    * { margin:0; padding:0; box-sizing:border-box; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ── */
+    header {
+      position: sticky; top:0; z-index:50;
+      background: rgba(8,12,20,0.95);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 28px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .logo { display:flex; align-items:center; gap:10px; }
+    .logo-icon {
+      width:34px; height:34px; border-radius:8px;
+      background: linear-gradient(135deg, var(--cyan), #0066ff);
+      display:grid; place-items:center; font-size:17px;
+    }
+    .logo-title { font-family:'Syne',sans-serif; font-size:13px; font-weight:800; letter-spacing:.12em; color:#fff; }
+    .logo-sub   { font-size:9px; color:var(--dim); letter-spacing:.2em; }
+
+    .header-right { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+
+    select {
+      background: var(--surface); border:1px solid var(--border);
+      color: var(--text); padding:6px 10px; border-radius:6px;
+      font-family:'JetBrains Mono',monospace; font-size:11px; cursor:pointer;
+    }
+    .btn {
+      border:1px solid var(--border); background:transparent;
+      color:var(--dim); padding:6px 14px; border-radius:6px;
+      cursor:pointer; font-family:'JetBrains Mono',monospace;
+      font-size:10px; letter-spacing:.08em; transition:all .2s;
+    }
+    .btn:hover { border-color:var(--cyan); color:var(--cyan); }
+    .btn-danger:hover { border-color:var(--red); color:var(--red); }
+
+    /* ── Feed ── */
+    main {
+      flex:1; max-width:820px; width:100%;
+      margin:0 auto; padding:28px 20px 180px;
+      display:flex; flex-direction:column; gap:18px;
+    }
+
+    .empty {
+      flex:1; display:flex; flex-direction:column;
+      align-items:center; justify-content:center;
+      gap:14px; opacity:.35; padding:80px 0; text-align:center;
+    }
+    .empty-icon { font-size:52px; }
+    .empty-text { font-size:11px; color:var(--dim); line-height:2.2; letter-spacing:.12em; }
+
+    /* ── Cards ── */
+    .card {
+      background:var(--surface); border:1px solid var(--border);
+      border-radius:14px; overflow:hidden;
+      animation: slideIn .35s ease;
+    }
+    @keyframes slideIn {
+      from { opacity:0; transform:translateY(12px); }
+      to   { opacity:1; transform:translateY(0); }
+    }
+    .card-heard { padding:16px 20px; border-bottom:1px solid var(--border); }
+    .card-reply { padding:16px 20px; background:rgba(0,212,255,0.03); }
+
+    .label { font-size:8px; letter-spacing:.2em; margin-bottom:8px; font-weight:700; }
+    .label-heard { color:var(--cyan); }
+    .label-reply { color:var(--green); }
+
+    .text-en { font-size:14px; color:#e8f0ff; line-height:1.7; }
+    .text-pt { font-size:12px; color:var(--dim); line-height:1.7; margin-top:6px; }
+    .text-response { font-size:14px; color:#a0f0cc; line-height:1.7; font-style:italic; }
+    .divider-pt {
+      border-top:1px solid var(--border); margin-top:10px; padding-top:10px;
+      font-size:11px; color:var(--dim); line-height:1.7;
+    }
+    .whisper-raw { font-size:9px; color:#2a3a53; margin-top:6px; font-style:italic; }
+
+    /* ── Loading ── */
+    .loading-card {
+      background:var(--surface); border:1px solid var(--border);
+      border-radius:14px; padding:20px;
+      display:flex; align-items:center; gap:14px;
+    }
+    .dots { display:flex; gap:5px; }
+    .dot {
+      width:7px; height:7px; border-radius:50%; background:var(--cyan);
+      animation: bounce 1.2s ease-in-out infinite;
+    }
+    .dot:nth-child(2) { animation-delay:.2s; }
+    .dot:nth-child(3) { animation-delay:.4s; }
+    @keyframes bounce {
+      0%,100% { opacity:.3; transform:scale(.7); }
+      50%      { opacity:1;  transform:scale(1); }
+    }
+    .loading-text { font-size:11px; color:var(--dim); letter-spacing:.08em; }
+
+    .error-bar {
+      background:rgba(255,60,80,.08); border:1px solid rgba(255,60,80,.3);
+      border-radius:10px; padding:12px 16px; font-size:11px; color:#ff8090;
+    }
+
+    /* ── Recording bar (topo fixo) ── */
+    #rec-bar {
+      position:fixed; top:70px; left:50%; transform:translateX(-50%);
+      background:rgba(255,60,80,.12); border:1px solid rgba(255,60,80,.4);
+      border-radius:24px; padding:10px 28px;
+      display:none; align-items:center; gap:10px;
+      backdrop-filter:blur(12px); z-index:40;
+      animation: fadeDown .2s ease;
+    }
+    @keyframes fadeDown {
+      from { opacity:0; transform:translateX(-50%) translateY(-8px); }
+      to   { opacity:1; transform:translateX(-50%) translateY(0); }
+    }
+    .rec-dot {
+      width:8px; height:8px; border-radius:50%; background:var(--red);
+      animation: blink 1s ease-in-out infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:.3;} 50%{opacity:1;} }
+    #rec-label { font-size:11px; color:#ff8090; letter-spacing:.1em; }
+    #rec-timer { font-size:13px; color:var(--red); font-weight:700; min-width:32px; }
+
+    /* ── Footer ── */
+    footer {
+      position:fixed; bottom:0; left:0; right:0;
+      background:rgba(8,12,20,0.97);
+      border-top:1px solid var(--border);
+      backdrop-filter:blur(20px);
+      padding:18px 24px;
+      display:flex; flex-direction:column; align-items:center; gap:10px;
+    }
+
+    /* Shortcut badge */
+    .shortcut-badge {
+      display:flex; align-items:center; gap:8px;
+      font-size:10px; color:var(--dim); letter-spacing:.1em;
+    }
+    .key {
+      background:var(--surface); border:1px solid var(--border);
+      border-radius:5px; padding:3px 10px;
+      font-size:11px; color:var(--text); font-weight:700;
+      box-shadow: 0 2px 0 var(--border);
+    }
+
+    /* Mic button */
+    #mic-btn {
+      width:72px; height:72px; border-radius:50%;
+      border:2px solid var(--border);
+      background:radial-gradient(circle, #131c2e, #0d1320);
+      font-size:26px; cursor:pointer;
+      display:grid; place-items:center;
+      transition:all .25s ease; position:relative;
+      user-select:none;
+    }
+    #mic-btn:hover { border-color:var(--cyan); }
+    #mic-btn.recording {
+      border-color:var(--red);
+      background:radial-gradient(circle, rgba(255,68,85,.2), rgba(255,68,85,.04));
+      box-shadow:0 0 32px rgba(255,68,85,.35), 0 0 70px rgba(255,68,85,.1);
+    }
+    #mic-btn.recording::after {
+      content:'';
+      position:absolute; inset:-10px; border-radius:50%;
+      border:2px solid rgba(255,68,85,.3);
+      animation:ripple 1.6s ease-out infinite;
+    }
+    @keyframes ripple {
+      0%   { transform:scale(1); opacity:.8; }
+      100% { transform:scale(1.7); opacity:0; }
+    }
+    #mic-btn.processing {
+      border-color:var(--cyan);
+      background:radial-gradient(circle, rgba(0,212,255,.12), rgba(0,212,255,.03));
+      cursor:not-allowed;
+    }
+
+    .footer-hint { font-size:9px; color:var(--dim); letter-spacing:.15em; }
+
+    /* ── Modal ── */
+    .modal-overlay {
+      display:none; position:fixed; inset:0;
+      background:rgba(0,0,0,.75); backdrop-filter:blur(4px);
+      z-index:100; align-items:center; justify-content:center;
+    }
+    .modal-overlay.open { display:flex; }
+    .modal {
+      background:var(--surface); border:1px solid var(--border);
+      border-radius:16px; padding:28px; width:360px;
+      display:flex; flex-direction:column; gap:14px;
+    }
+    .modal h3 { font-family:'Syne',sans-serif; font-size:16px; }
+    .modal input {
+      background:var(--bg); border:1px solid var(--border);
+      color:var(--text); padding:10px 14px; border-radius:8px;
+      font-family:'JetBrains Mono',monospace; font-size:13px;
+      outline:none; width:100%;
+    }
+    .modal input:focus { border-color:var(--cyan); }
+    .modal-actions { display:flex; gap:8px; justify-content:flex-end; }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ── -->
+<header>
+  <div class="logo">
+    <div class="logo-icon">🎙</div>
+    <div>
+      <div class="logo-title">INTERVIEW ASSISTANT</div>
+      <div class="logo-sub">WHISPER · CLAUDE · POSTGRESQL · BY LUCAS MELO</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <select id="session-select">
+      <option value="">Carregando...</option>
+    </select>
+    <button class="btn" onclick="openModal()">+ SESSÃO</button>
+    <button class="btn btn-danger" onclick="clearFeed()">LIMPAR</button>
+  </div>
+</header>
+
+<!-- ── Recording bar ── -->
+<div id="rec-bar">
+  <div class="rec-dot"></div>
+  <span id="rec-label">GRAVANDO</span>
+  <span id="rec-timer">0s</span>
+  <span id="rec-label2" style="font-size:10px;color:#5a7090;">· PRESSIONE F1 PARA ENVIAR</span>
+</div>
+
+<!-- ── Feed ── -->
+<main id="feed">
+  <div class="empty">
+    <div class="empty-icon">🎙</div>
+    <div class="empty-text">
+      CRIE UMA SESSÃO<br>
+      PRESSIONE <strong style="color:var(--text)">F1</strong> PARA INICIAR A GRAVAÇÃO<br>
+      PRESSIONE <strong style="color:var(--text)">F1</strong> NOVAMENTE PARA ENVIAR
+    </div>
+  </div>
+</main>
+
+<!-- ── Footer ── -->
+<footer>
+  <button id="mic-btn" onclick="toggleRecording()">🎙</button>
+  <div class="shortcut-badge">
+    <span class="key">F1</span>
+    <span id="mic-hint">INICIAR GRAVAÇÃO</span>
+  </div>
+</footer>
+
+<!-- ── Modal Nova Sessão ── -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <h3>Nova Sessão</h3>
+    <input id="session-title" type="text" placeholder="Ex: Entrevista Remoov — Fev 2025" />
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">CANCELAR</button>
+      <button class="btn" style="border-color:var(--cyan);color:var(--cyan);" onclick="createSession()">CRIAR</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────
+// Config
+// ─────────────────────────────────────────────
+const API = 'http://localhost:8000/api';
+
+// ─────────────────────────────────────────────
+// Estado global
+// ─────────────────────────────────────────────
+let currentSessionId = null;
+let mediaRecorder    = null;
+let audioChunks      = [];
+let timerInterval    = null;
+let timerSeconds     = 0;
+let stream           = null;
+let isRecording      = false;
+let isProcessing     = false;
+
+// ─────────────────────────────────────────────
+// Atalho de teclado F1
+// ─────────────────────────────────────────────
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'F1') {
+    e.preventDefault(); // evita abrir ajuda do navegador
+    toggleRecording();
+  }
+});
+
+// ─────────────────────────────────────────────
+// Toggle principal — liga ou desliga gravação
+// ─────────────────────────────────────────────
+function toggleRecording() {
+  if (isProcessing) return; // ignora enquanto processa
+
+  if (!currentSessionId) {
+    alert('Crie ou selecione uma sessão antes de gravar.');
+    return;
+  }
+
+  if (isRecording) {
+    stopRecording();
+  } else {
+    startRecording();
+  }
+}
+
+// ─────────────────────────────────────────────
+// Iniciar gravação
+// ─────────────────────────────────────────────
+async function startRecording() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    showError('Permissão de microfone negada: ' + err.message);
+    return;
+  }
+
+  audioChunks = [];
+
+  const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm'
+                 : MediaRecorder.isTypeSupported('audio/ogg')  ? 'audio/ogg'
+                 : 'audio/mp4';
+
+  mediaRecorder = new MediaRecorder(stream, { mimeType });
+  mediaRecorder.ondataavailable = (e) => {
+    if (e.data.size > 0) audioChunks.push(e.data);
+  };
+  mediaRecorder.start(100);
+  isRecording = true;
+
+  // ── UI: estado gravando ──
+  const btn = document.getElementById('mic-btn');
+  btn.textContent = '⏹';
+  btn.classList.add('recording');
+
+  document.getElementById('mic-hint').textContent  = 'PARAR E ENVIAR';
+  document.getElementById('rec-bar').style.display = 'flex';
+
+  // Timer
+  timerSeconds = 0;
+  updateTimer();
+  timerInterval = setInterval(() => {
+    timerSeconds++;
+    updateTimer();
+    if (timerSeconds >= 45) {
+      stopRecording(); // auto-stop em 45s
+    }
+  }, 1000);
+}
+
+function updateTimer() {
+  document.getElementById('rec-timer').textContent = timerSeconds + 's';
+}
+
+// ─────────────────────────────────────────────
+// Parar gravação e enviar
+// ─────────────────────────────────────────────
+function stopRecording() {
+  if (!mediaRecorder || mediaRecorder.state !== 'recording') return;
+
+  clearInterval(timerInterval);
+  isRecording = false;
+
+  // ── UI: estado processando ──
+  const btn = document.getElementById('mic-btn');
+  btn.textContent = '⏳';
+  btn.classList.remove('recording');
+  btn.classList.add('processing');
+
+  document.getElementById('mic-hint').textContent  = 'PROCESSANDO...';
+  document.getElementById('rec-bar').style.display = 'none';
+
+  mediaRecorder.stop();
+  mediaRecorder.onstop = async () => {
+    stream.getTracks().forEach(t => t.stop());
+
+    if (audioChunks.length === 0 || timerSeconds < 1) {
+      resetMicBtn();
+      showError('Gravação muito curta. Fale por pelo menos 1 segundo.');
+      return;
+    }
+
+    const mimeType = mediaRecorder.mimeType || 'audio/webm';
+    const ext      = mimeType.includes('ogg') ? 'ogg'
+                   : mimeType.includes('mp4') ? 'mp4' : 'webm';
+    const blob = new Blob(audioChunks, { type: mimeType });
+
+    await sendAudio(blob, ext);
+  };
+}
+
+// ─────────────────────────────────────────────
+// Envia áudio para o backend
+// ─────────────────────────────────────────────
+async function sendAudio(blob, ext) {
+  isProcessing = true;
+  showLoading();
+
+  const formData = new FormData();
+  formData.append('session_id', currentSessionId);
+  formData.append('audio', blob, `recording.${ext}`);
+
+  try {
+    const res = await fetch(`${API}/messages/process-audio`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Erro HTTP ${res.status}`);
+    }
+
+    const data = await res.json();
+    removeLoading();
+    appendCard(data);
+  } catch (e) {
+    removeLoading();
+    showError('Erro ao processar: ' + e.message);
+  } finally {
+    isProcessing = false;
+    resetMicBtn();
+  }
+}
+
+// ─────────────────────────────────────────────
+// Resetar botão para estado inicial
+// ─────────────────────────────────────────────
+function resetMicBtn() {
+  const btn = document.getElementById('mic-btn');
+  btn.textContent = '🎙';
+  btn.classList.remove('recording', 'processing');
+  document.getElementById('mic-hint').textContent = 'INICIAR GRAVAÇÃO';
+}
+
+// ─────────────────────────────────────────────
+// Render de cards
+// ─────────────────────────────────────────────
+function appendCard(msg) {
+  removeEmpty();
+  const feed = document.getElementById('feed');
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = `
+    <div class="card-heard">
+      <div class="label label-heard">🔊 VOCÊ OUVIU</div>
+      <div class="text-en">${esc(msg.original_en)}</div>
+      <div class="text-pt">${esc(msg.translation_pt)}</div>
+      ${msg.whisper_transcript && msg.whisper_transcript !== msg.original_en
+        ? `<div class="whisper-raw">📝 Whisper raw: "${esc(msg.whisper_transcript)}"</div>` : ''}
+    </div>
+    <div class="card-reply">
+      <div class="label label-reply">💬 RESPONDA ASSIM</div>
+      <div class="text-response">"${esc(msg.suggested_response_en)}"</div>
+      <div class="divider-pt">${esc(msg.suggested_response_pt)}</div>
+    </div>
+  `;
+  feed.appendChild(card);
+  card.scrollIntoView({ behavior: 'smooth' });
+}
+
+let loadingEl = null;
+function showLoading() {
+  removeEmpty();
+  loadingEl = document.createElement('div');
+  loadingEl.className = 'loading-card';
+  loadingEl.innerHTML = `
+    <div class="dots">
+      <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+    </div>
+    <span class="loading-text">WHISPER TRANSCREVENDO → CLAUDE PROCESSANDO...</span>
+  `;
+  document.getElementById('feed').appendChild(loadingEl);
+  loadingEl.scrollIntoView({ behavior: 'smooth' });
+}
+function removeLoading() { loadingEl?.remove(); loadingEl = null; }
+
+function showError(msg) {
+  const el = document.createElement('div');
+  el.className = 'error-bar';
+  el.textContent = '⚠️ ' + msg;
+  document.getElementById('feed').appendChild(el);
+  setTimeout(() => el.remove(), 6000);
+}
+
+function removeEmpty() { document.querySelector('.empty')?.remove(); }
+
+function clearFeed() {
+  document.getElementById('feed').innerHTML = `
+    <div class="empty">
+      <div class="empty-icon">🎙</div>
+      <div class="empty-text">
+        CRIE UMA SESSÃO<br>
+        PRESSIONE <strong style="color:var(--text)">F1</strong> PARA INICIAR A GRAVAÇÃO<br>
+        PRESSIONE <strong style="color:var(--text)">F1</strong> NOVAMENTE PARA ENVIAR
+      </div>
+    </div>`;
+}
+
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ─────────────────────────────────────────────
+// Sessões
+// ─────────────────────────────────────────────
+async function loadSessions() {
+  try {
+    const res = await fetch(`${API}/sessions/`);
+    const sessions = await res.json();
+    const sel = document.getElementById('session-select');
+    sel.innerHTML = '<option value="">Selecione uma sessão</option>';
+    sessions.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.id;
+      opt.textContent = `${s.title} (${s.message_count} msgs)`;
+      sel.appendChild(opt);
+    });
+  } catch (e) { console.error('Erro ao carregar sessões:', e); }
+}
+
+document.getElementById('session-select').addEventListener('change', function () {
+  currentSessionId = this.value ? parseInt(this.value) : null;
+  clearFeed();
+  if (currentSessionId) loadSessionMessages(currentSessionId);
+});
+
+async function loadSessionMessages(sessionId) {
+  try {
+    const res = await fetch(`${API}/messages/${sessionId}`);
+    const messages = await res.json();
+    clearFeed();
+    messages.forEach(appendCard);
+  } catch (e) { showError('Erro ao carregar mensagens.'); }
+}
+
+// ─────────────────────────────────────────────
+// Modal
+// ─────────────────────────────────────────────
+function openModal() { document.getElementById('modal').classList.add('open'); }
+function closeModal() {
+  document.getElementById('modal').classList.remove('open');
+  document.getElementById('session-title').value = '';
+}
+
+async function createSession() {
+  const title = document.getElementById('session-title').value.trim() || 'Sessão sem título';
+  try {
+    const res = await fetch(`${API}/sessions/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    });
+    const session = await res.json();
+    currentSessionId = session.id;
+    closeModal();
+    await loadSessions();
+    document.getElementById('session-select').value = session.id;
+    clearFeed();
+  } catch (e) { showError('Erro ao criar sessão: ' + e.message); }
+}
+
+// ─────────────────────────────────────────────
+// Init
+// ─────────────────────────────────────────────
+loadSessions();
+</script>
+</body>
+</html>
